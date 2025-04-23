@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .upload-section {
+            border: 2px dashed #ccc;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-section:hover {
+            border-color: #4CAF50;
+            background-color: #f8f8f8;
+        }
+
+        .upload-section.dragover {
+            border-color: #4CAF50;
+            background-color: #e8f5e9;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .waveform {
+            width: 100%;
+            height: 100px;
+            background-color: #f0f0f0;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .timeline {
+            width: 100%;
+            height: 2px;
+            background-color: #333;
+            position: relative;
+        }
+
+        .playhead {
+            position: absolute;
+            width: 2px;
+            height: 100px;
+            background-color: #4CAF50;
+            top: 0;
+            left: 0;
+        }
+
+        .time-display {
+            text-align: center;
+            margin-top: 0.5rem;
+            color: #666;
+        }
+
+        .effects {
+            margin-top: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .effect-control {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        label {
+            min-width: 100px;
+        }
+
+        input[type="range"] {
+            flex-grow: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Editor</h1>
+        
+        <div class="upload-section" id="dropZone">
+            <p>Drag and drop an audio file here or click to select</p>
+            <input type="file" id="fileInput" accept="audio/*" style="display: none;">
+        </div>
+
+        <div class="waveform" id="waveform">
+            <div class="playhead" id="playhead"></div>
+        </div>
+        <div class="timeline"></div>
+        <div class="time-display">
+            <span id="currentTime">0:00</span> / <span id="totalTime">0:00</span>
+        </div>
+
+        <div class="controls">
+            <button id="playButton" disabled>Play</button>
+            <button id="pauseButton" disabled>Pause</button>
+            <button id="stopButton" disabled>Stop</button>
+        </div>
+
+        <div class="effects">
+            <div class="effect-control">
+                <label for="volume">Volume:</label>
+                <input type="range" id="volume" min="0" max="1" step="0.01" value="1">
+            </div>
+            <div class="effect-control">
+                <label for="speed">Playback Speed:</label>
+                <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const playButton = document.getElementById('playButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const stopButton = document.getElementById('stopButton');
+        const volumeControl = document.getElementById('volume');
+        const speedControl = document.getElementById('speed');
+        const currentTimeDisplay = document.getElementById('currentTime');
+        const totalTimeDisplay = document.getElementById('totalTime');
+        const playhead = document.getElementById('playhead');
+
+        let audioContext;
+        let audioBuffer;
+        let sourceNode;
+        let gainNode;
+        let isPlaying = false;
+        let startTime;
+        let pauseTime = 0;
+
+        // Handle file selection
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('audio/')) {
+                handleFile(file);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        function handleFile(file) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    audioBuffer = await audioContext.decodeAudioData(e.target.result);
+                    
+                    // Enable controls
+                    playButton.disabled = false;
+                    pauseButton.disabled = false;
+                    stopButton.disabled = false;
+
+                    // Update total time display
+                    const minutes = Math.floor(audioBuffer.duration / 60);
+                    const seconds = Math.floor(audioBuffer.duration % 60);
+                    totalTimeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                } catch (error) {
+                    console.error('Error loading audio file:', error);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function playAudio() {
+            if (!audioBuffer) return;
+
+            if (!isPlaying) {
+                sourceNode = audioContext.createBufferSource();
+                gainNode = audioContext.createGain();
+                
+                sourceNode.buffer = audioBuffer;
+                sourceNode.playbackRate.value = speedControl.value;
+                gainNode.gain.value = volumeControl.value;
+                
+                sourceNode.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                startTime = audioContext.currentTime - pauseTime;
+                sourceNode.start(0, pauseTime);
+                
+                isPlaying = true;
+                updatePlayhead();
+            }
+        }
+
+        function pauseAudio() {
+            if (isPlaying && sourceNode) {
+                sourceNode.stop();
+                pauseTime = audioContext.currentTime - startTime;
+                isPlaying = false;
+            }
+        }
+
+        function stopAudio() {
+            if (sourceNode) {
+                sourceNode.stop();
+                isPlaying = false;
+                pauseTime = 0;
+                updateTimeDisplay(0);
+                playhead.style.left = '0px';
+            }
+        }
+
+        function updatePlayhead() {
+            if (!isPlaying) return;
+
+            const currentTime = audioContext.currentTime - startTime;
+            const progress = (currentTime / audioBuffer.duration) * 100;
+            playhead.style.left = `${progress}%`;
+            updateTimeDisplay(currentTime);
+
+            if (currentTime < audioBuffer.duration) {
+                requestAnimationFrame(updatePlayhead);
+            } else {
+                stopAudio();
+            }
+        }
+
+        function updateTimeDisplay(time) {
+            const minutes = Math.floor(time / 60);
+            const seconds = Math.floor(time % 60);
+            currentTimeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Event listeners for controls
+        playButton.addEventListener('click', playAudio);
+        pauseButton.addEventListener('click', pauseAudio);
+        stopButton.addEventListener('click', stopAudio);
+
+        volumeControl.addEventListener('input', () => {
+            if (gainNode) {
+                gainNode.gain.value = volumeControl.value;
+            }
+        });
+
+        speedControl.addEventListener('input', () => {
+            if (sourceNode) {
+                sourceNode.playbackRate.value = speedControl.value;
+            }
+        });
+    </script>
+</body>
+</html> 
